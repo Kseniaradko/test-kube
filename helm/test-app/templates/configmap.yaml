@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "test-app.fullname" . }}-config
+  labels:
+    {{- include "test-app.labels" . | nindent 4 }}
+data:
+  APP_TITLE: {{ .Values.appConfig.title | quote }}
+  APP_ENV: {{ .Values.appConfig.environment | quote }}
+  APP_BANNER: {{ .Values.appConfig.banner | quote }}
+  APP_VERSION: {{ .Values.appConfig.version | quote }}
+  APP_HIGHLIGHT_LABEL: {{ .Values.appConfig.highlightLabel | quote }}

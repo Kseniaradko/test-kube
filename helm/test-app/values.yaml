@@ -1,0 +1,25 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/example/test-app
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 80
+
+appConfig:
+  title: "React Kubernetes Demo"
+  environment: "timeweb-k0s"
+  banner: "Runtime config is coming from Kubernetes"
+  version: "1.0.0"
+  highlightLabel: "Helm release active"
+
+resources: {}
+
+imagePullSecrets: []
