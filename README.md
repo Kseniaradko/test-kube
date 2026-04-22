@@ -27,7 +27,53 @@
 - `kubectl`, настроенный на твой k0s-кластер в Timeweb Cloud;
 - доступ к registry, куда можно пушить образы.
 
-## 1. Локальный запуск
+## 1. Подключение kubectl к кластеру
+
+Сначала нужно получить `kubeconfig` для кластера из Timeweb Cloud. В этом сценарии используется файл `twc-prod-last-config.yaml`.
+
+Если файл лежит в `Downloads`, подключение выглядит так:
+
+```bash
+export KUBECONFIG=~/Downloads/twc-prod-last-config.yaml
+kubectl config get-contexts
+kubectl config current-context
+kubectl get nodes
+kubectl cluster-info
+```
+
+Если `current-context` не выбран, сначала посмотри список доступных context:
+
+```bash
+kubectl config get-contexts
+```
+
+Потом выбери нужный context по имени из колонки `NAME`:
+
+```bash
+kubectl config use-context twc-prod
+```
+
+После этого можно проверить доступ к кластеру и namespace:
+
+```bash
+kubectl get nodes
+kubectl get ns
+kubectl get pods -n default
+```
+
+Если не хочешь делать `export`, можно указывать `kubeconfig` прямо в команде:
+
+```bash
+KUBECONFIG=~/Downloads/twc-prod-last-config.yaml kubectl get nodes
+```
+
+Для `k9s` используется тот же `kubeconfig`:
+
+```bash
+KUBECONFIG=~/Downloads/twc-prod-last-config.yaml k9s
+```
+
+## 2. Локальный запуск
 
 Установить зависимости:
 
@@ -43,7 +89,7 @@ npm run dev
 
 После этого открой адрес, который покажет Vite.
 
-## 2. Показать изменение компонента
+## 3. Показать изменение компонента
 
 Для демонстрации правь один из файлов:
 
@@ -58,7 +104,7 @@ npm run dev
 3. Сохранить файл.
 4. Показать, что Vite сразу отобразил изменение.
 
-## 3. Production build
+## 4. Production build
 
 ```bash
 npm run build
@@ -66,13 +112,27 @@ npm run build
 
 Готовая production-сборка появится в `dist/`.
 
-## 4. Сборка Docker-образа
+## 5. Сборка Docker-образа
 
 Пример локальной сборки:
 
 ```bash
-docker build -t test-app:local .
+docker build -t demo:local .
 ```
+
+Если собираешь образ на Mac, а Kubernetes-ноды в кластере работают на Linux `amd64`, для деплоя лучше собирать образ сразу под нужную архитектуру. Иначе можно получить `exec format error` при старте контейнера.
+
+Пример сборки и отправки образа в registry для Linux-нод:
+Надо изначально создать себе регистри и залогиниться в него, а потом подставить название регистри в команду ниже
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -t app.registry.twcstorage.ru/demo/test-app:1.0.0 \
+  --push .
+```
+
+Если хочешь один тег и для локальной работы на Mac, и для кластера, можно собрать multi-arch образ:
 
 Пример локального запуска контейнера:
 
@@ -83,7 +143,7 @@ docker run --rm -p 8080:80 \
   -e APP_BANNER="Runtime config delivered by container env" \
   -e APP_VERSION="1.0.0" \
   -e APP_HIGHLIGHT_LABEL="Container smoke test" \
-  test-app:local
+  demo:local
 ```
 
 Проверить:
@@ -91,50 +151,48 @@ docker run --rm -p 8080:80 \
 - приложение: `http://localhost:8080`
 - healthcheck: `http://localhost:8080/healthz`
 
-## 5. Загрузка образа в registry
+## 6. Загрузка образа в registry (он уже был загружен выше, так тоже можно было закинуть)
 
 Пример для произвольного registry:
 
 ```bash
-docker tag test-app:local registry.example.com/demo/test-app:1.0.0
-docker push registry.example.com/demo/test-app:1.0.0
+docker tag demo:local app-test-spb.registry.twcstorage.ru/demo/demo-app:1.0.0
+docker push app-test-spb.registry.twcstorage.ru/demo/demo-app:1.0.0
 ```
 
-Если используешь GitHub Container Registry, пример будет таким:
-
-```bash
-docker tag test-app:local ghcr.io/<your-org-or-user>/test-app:1.0.0
-docker push ghcr.io/<your-org-or-user>/test-app:1.0.0
-```
-
-## 6. Деплой в k0s / Timeweb Cloud через Helm
+## 7. Деплой в k0s / Timeweb Cloud через Helm
+Надо изначально добавить реестр в кубернетис в определенный неймспейс, тут дальше команда для дефолтного неймспейса
+надо подставить название реестра и название секретов и тэга
 
 Базовый запуск:
 
 ```bash
 helm upgrade --install demo ./helm/test-app \
-  --set image.repository=ghcr.io/<your-org-or-user>/test-app \
-  --set image.tag=1.0.0
-```
-
-Если registry приватный, сначала создай secret:
-
-```bash
-kubectl create secret docker-registry regcred \
-  --docker-server=ghcr.io \
-  --docker-username=<your-user> \
-  --docker-password=<your-token> \
-  --docker-email=<your-email>
-```
-
-И передай его в chart:
-
-```bash
-helm upgrade --install demo ./helm/test-app \
-  --set image.repository=ghcr.io/<your-org-or-user>/test-app \
+  -n default \
+  --set image.repository=app.registry.twcstorage.ru/demo/test-app \
   --set image.tag=1.0.0 \
-  --set imagePullSecrets[0].name=regcred
+  --set 'imagePullSecrets[0].name=craas-app'
 ```
+
+Как эта команда добавляет deployment в Kubernetes:
+
+1. `helm upgrade --install` берет chart из `./helm/test-app`.
+2. Helm читает `values.yaml` и подмешивает значения из `--set`.
+3. Потом Helm рендерит шаблоны из `helm/test-app/templates/`.
+4. Из `templates/deployment.yaml` получается реальный Kubernetes `Deployment`.
+5. Из `templates/service.yaml` получается `Service`.
+6. Из `templates/configmap.yaml` получается `ConfigMap`.
+7. Helm отправляет эти манифесты в кластер через Kubernetes API в namespace `default`.
+
+Для этого проекта команда выше делает следующее:
+
+- создает или обновляет release с именем `demo`;
+- создает `Deployment` с именем `demo-test-app`;
+- подставляет образ `26378ada-charming-titania.registry.twcstorage.ru/demo/test-app:1.0.1`;
+- добавляет `imagePullSecrets`, чтобы pod смог скачать приватный образ из registry;
+- создает `Service`, через который приложение становится доступно в кластере и через `LoadBalancer`.
+
+Если release `demo` еще не существует, Helm установит его с нуля. Если уже существует, Helm обновит существующие ресурсы.
 
 Проверка релиза:
 
@@ -142,6 +200,26 @@ helm upgrade --install demo ./helm/test-app \
 kubectl get pods,svc
 kubectl rollout status deployment/demo-test-app
 ```
+
+Если сервис типа `LoadBalancer` получил внешний IP, приложение обычно доступно по этому адресу напрямую:
+
+```bash
+kubectl get svc -n default
+```
+
+Смотри значение в колонке `EXTERNAL-IP`. Если у сервиса `demo-test-app` указан внешний адрес, открой в браузере:
+
+```text
+http://<EXTERNAL-IP>
+```
+
+Если у балансировщика настроен не `80` порт, тогда используй:
+
+```text
+http://<EXTERNAL-IP>:<PORT>
+```
+
+В этом chart по умолчанию сервис слушает `80`, поэтому чаще всего достаточно просто открыть IP балансировщика без дополнительного порта.
 
 Если `LoadBalancer` не выдает внешний IP, есть два быстрых варианта:
 
@@ -152,7 +230,7 @@ kubectl rollout status deployment/demo-test-app
 kubectl port-forward svc/demo-test-app 8080:80
 ```
 
-## 7. Показать изменение конфигурации без пересборки
+## 8. Показать изменение конфигурации без пересборки
 
 Это второй важный сценарий лабы: React-код не меняется, меняются только values/env.
 
@@ -160,18 +238,27 @@ kubectl port-forward svc/demo-test-app 8080:80
 
 ```bash
 helm upgrade --install demo ./helm/test-app \
-  --set image.repository=ghcr.io/<your-org-or-user>/test-app \
-  --set image.tag=1.0.0 \
+  -n default \
+  --set image.repository=26378ada-charming-titania.registry.twcstorage.ru/demo/test-app \
+  --set image.tag=1.0.1 \
+  --set 'imagePullSecrets[0].name=craas-26378ada-charming-titania' \
   --set appConfig.title="Timeweb Demo" \
   --set appConfig.environment="prod" \
   --set appConfig.banner="This text came from Helm values" \
-  --set appConfig.version="1.0.0" \
+  --set appConfig.version="1.0.1" \
   --set appConfig.highlightLabel="Config updated without rebuild"
 ```
 
 После обновления страницы увидишь новый banner, environment и label без пересборки frontend bundle.
 
-## 8. Полезный сценарий показа целиком
+Если после `helm upgrade` значения в интерфейсе не поменялись, перезапусти deployment вручную, потому что в текущем chart обновление `ConfigMap` само по себе не всегда приводит к перезапуску pod:
+
+```bash
+kubectl rollout restart deployment/demo-test-app -n default
+kubectl rollout status deployment/demo-test-app -n default
+```
+
+## 9. Полезный сценарий показа целиком
 
 На демо можно пройти такой путь:
 
@@ -185,7 +272,7 @@ helm upgrade --install demo ./helm/test-app \
 8. Потом изменить только `appConfig.banner` и снова сделать `helm upgrade --install`.
 9. Показать, что конфиг изменился без изменения React-кода и без новой сборки фронтенда.
 
-## 9. Полезные команды
+## 10. Полезные команды
 
 Отрендерить chart без деплоя:
 
